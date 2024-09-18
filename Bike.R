@@ -60,7 +60,56 @@ cor(trainData$temp,trainData$humidity)
 table(trainData$weather)
 table(trainData$season)
 
-# setup and fit the linear regresssion model
+
+# Feature Engineering (hw 5)
+# remove the casual and registered variable and change to log count
+CleanTrainData <- trainData %>%
+  select(-casual,-registered) %>%
+  mutate(count=log(count))
+
+# define my recipe
+bike_recipe <- recipe(count~.,data=CleanTrainData) %>%
+  step_mutate(season=factor(season, levels=c(1,2,3,4),labels = c("spring","summer","fall","winter"))) %>%
+  step_mutate(weather=ifelse(weather==4,3,weather)) %>%
+  step_mutate(weather=factor(weather,levels=c(1,2,3),labels=c("cloudy","misty","rain"))) %>%
+  step_mutate(temp_windspeed = temp*windspeed) %>%
+  step_time(datetime, features=c("hour","minute")) %>%
+  step_date(datetime, features=c("dow")) %>%
+  step_mutate(datetime_hour=as.factor(datetime_hour)) %>%
+  step_zv(all_predictors()) %>%
+  step_poly(temp, degree=3) %>%
+  step_dummy(all_nominal_predictors())
+
+prepped_recipe <- prep(bike_recipe)
+bake(prepped_recipe, new_data=CleanTrainData)
+
+# define a model
+lin_model <- linear_reg() %>%
+  set_engine("lm") %>%
+  set_mode("regression")
+
+# combine into a workflow and fit
+bike_workflow <- workflow() %>%
+  add_recipe(bike_recipe) %>%
+  add_model(lin_model) %>%
+  fit(data=CleanTrainData)
+
+## run all the steps on test data and put it in the right form to submit
+lin_preds <- predict(bike_workflow, new_data = testData)
+lin_preds <- exp(lin_preds)
+
+data_engineering_submission <- lin_preds %>%
+  bind_cols(.,testData) %>%
+  select(datetime, .pred) %>%
+  rename(count=.pred) %>%
+  mutate(count=pmax(0,count)) %>%
+  mutate(datetime=as.character(format(datetime)))
+
+vroom_write(x=data_engineering_submission, file ="C:/Users/Josh/BikeShare/bike-sharing-demand/DataEngineeringPreds.csv", delim=",")
+
+
+
+# setup and fit the linear regression model
 my_linear_model <- linear_reg() %>%
   set_engine("lm") %>%
   set_mode("regression") %>% # regression just means quantitative response
@@ -81,8 +130,28 @@ kaggle_submission <- bike_predictions %>%
   mutate(count=pmax(0,count)) %>%
   mutate(datetime=as.character(format(datetime)))
 
-vroom_write(x=kaggle_submission, file ="./LinearPreds.csv", delim=",")
+vroom_write(x=kaggle_submission, file ="C:/Users/Josh/BikeShare/bike-sharing-demand/LinearPreds.csv", delim=",")
           
-  
-  
+# now we'll fit the poisson model
+library(poissonreg)
+
+my_poisson_model <- poisson_reg() %>%
+  set_engine("glm") %>%
+  set_mode("regression") %>%
+  fit(formula=count~temp+humidity+windspeed+holiday+workingday,data=trainData)
+
+bike_poisson_predictions <- predict(my_poisson_model,
+                                   new_data=testData)
+bike_poisson_predictions
+
+# format the predictions for submission to kaggle
+pois_kaggle_submission <- bike_poisson_predictions %>%
+  bind_cols(., testData) %>%
+  select(datetime, .pred) %>%
+  rename(count=.pred) %>%
+  mutate(datetime=as.character(format(datetime)))
+
+# write out the file
+vroom_write(x=pois_kaggle_submission, file="C:/Users/Josh/BikeShare/bike-sharing-demand/PoissonPreds.csv", delim=",")
+
 
