@@ -5,7 +5,7 @@ library(ggplot2)
 library(patchwork)
 #install.packages("DataExplorer","skimr")
 #install.packages("GGally")
-
+install.packages("glmnet")
 trainData <- vroom("C:/Users/Josh/Documents/stat348/BikeShare/bike-sharing-demand/train.csv")
 
 # some exploratory graphs
@@ -61,7 +61,7 @@ table(trainData$weather)
 table(trainData$season)
 
 
-# Feature Engineering (hw 5)
+# Feature Engineering (hw 6)
 # remove the casual and registered variable and change to log count
 CleanTrainData <- trainData %>%
   select(-casual,-registered) %>%
@@ -155,3 +155,80 @@ pois_kaggle_submission <- bike_poisson_predictions %>%
 vroom_write(x=pois_kaggle_submission, file="C:/Users/Josh/BikeShare/bike-sharing-demand/PoissonPreds.csv", delim=",")
 
 
+## penalized regression section (hw 7)
+# create the recipe
+bike_recipe_pregression <- recipe(count~.,data=CleanTrainData) %>%
+  step_mutate(season=factor(season, levels=c(1,2,3,4),labels = c("spring","summer","fall","winter"))) %>%
+  step_mutate(weather=ifelse(weather==4,3,weather)) %>%
+  step_mutate(weather=factor(weather,levels=c(1,2,3),labels=c("cloudy","misty","rain"))) %>%
+  step_mutate(temp_windspeed = temp*windspeed) %>%
+  step_time(datetime, features=c("hour","minute")) %>%
+  step_date(datetime, features=c("dow")) %>%
+  step_mutate(datetime_hour=as.factor(datetime_hour)) %>%
+  step_rm(datetime) %>%
+  step_zv(all_predictors()) %>%
+  step_poly(temp, degree=3) %>%
+  step_dummy(all_nominal_predictors()) %>%
+  step_normalize
+
+# penalized regression model
+preg_model <- linear_reg(penalty=1,mixture=0) %>%
+  set_engine("glmnet")
+preg_wf <- workflow() %>%
+  add_recipe(bike_recipe_pregression) %>%
+  add_model(preg_model) %>%
+  fit(data=CleanTrainData)
+predict(preg_wf, new_data=testData)
+
+# format the predictions for kaggle
+preg_preds <- predict(preg_wf, new_data = testData)
+
+preg_kaggle_submission <- preg_preds %>%
+  bind_cols(., testData) %>%
+  select(datetime, .pred) %>%
+  rename(count=.pred) %>%
+  mutate(count=exp(count)) %>%
+  mutate(datetime=as.character(format(datetime)))
+
+# write out the file
+vroom_write(x=preg_kaggle_submission, file="C:/Users/Josh/BikeShare/bike-sharing-demand/PregPreds.csv", delim=",")
+
+
+
+
+
+
+# Cross-Validation (HW 7)
+# penalized regression model
+preg_model <- linear_reg(penalty=tune(),
+                         mixture=tune()) %>%
+  set_engine("glmnet")
+
+# set workflow
+preg_wf <- workflow() %>%
+  add_recipe(bike_recipe) %>%
+  add_model(preg_model)
+
+# Grid of values to tune over
+grid_of_tuning_params <- grid_regular(penalty(),
+                                      mixture(),
+                                      levels = L)
+
+# split data for CV
+folds <- vfold_cv(CleanTrainData, v = K, repeats=1)
+
+# Run the CV
+CV_results <- preg_wf %>%
+  tune_grid(resamples=folds,
+            grid=grid_of_tuning_params,
+            metrics=metric_set(rmse,mae,rsq))
+
+# plot results
+collect_metric(CV_results) %>%
+  filter(.metric=="rmse") %>%
+  ggplot(data=.,aes(x=penalty,y=mean,color=factor(mixture))) +
+  geom_line()
+
+# Find best tuning parameters
+bestTune <- CV_results %>%
+  select_best("rmse")
