@@ -196,8 +196,6 @@ vroom_write(x=preg_kaggle_submission, file="C:/Users/Josh/BikeShare/bike-sharing
 
 
 
-
-
 # Cross-Validation (HW 7)
 # penalized regression model
 preg_model <- linear_reg(penalty=tune(),
@@ -206,16 +204,16 @@ preg_model <- linear_reg(penalty=tune(),
 
 # set workflow
 preg_wf <- workflow() %>%
-  add_recipe(bike_recipe) %>%
+  add_recipe(bike_recipe_pregression) %>%
   add_model(preg_model)
 
 # Grid of values to tune over
 grid_of_tuning_params <- grid_regular(penalty(),
                                       mixture(),
-                                      levels = L)
+                                      levels = 5)
 
 # split data for CV
-folds <- vfold_cv(CleanTrainData, v = K, repeats=1)
+folds <- vfold_cv(CleanTrainData, v = 10, repeats=1)
 
 # Run the CV
 CV_results <- preg_wf %>%
@@ -224,11 +222,30 @@ CV_results <- preg_wf %>%
             metrics=metric_set(rmse,mae,rsq))
 
 # plot results
-collect_metric(CV_results) %>%
+collect_metrics(CV_results) %>%
   filter(.metric=="rmse") %>%
   ggplot(data=.,aes(x=penalty,y=mean,color=factor(mixture))) +
   geom_line()
 
 # Find best tuning parameters
 bestTune <- CV_results %>%
-  select_best("rmse")
+  select_best(metric = "rsq")
+
+# Finalize the workflow and fit it
+final_wf <- preg_wf %>%
+  finalize_workflow(bestTune) %>%
+  fit(data=CleanTrainData)
+
+# Predict
+cv_preds <- predict(final_wf, new_data = testData)
+
+
+cv_kaggle_submission <- cv_preds %>%
+  bind_cols(., testData) %>%
+  select(datetime, .pred) %>%
+  rename(count=.pred) %>%
+  mutate(count=exp(count)) %>%
+  mutate(datetime=as.character(format(datetime)))
+
+# write out the file
+vroom_write(x=cv_kaggle_submission, file="C:/Users/Josh/BikeShare/bike-sharing-demand/CVPreds.csv", delim=",")
