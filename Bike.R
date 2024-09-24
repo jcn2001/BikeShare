@@ -249,3 +249,71 @@ cv_kaggle_submission <- cv_preds %>%
 
 # write out the file
 vroom_write(x=cv_kaggle_submission, file="C:/Users/Josh/BikeShare/bike-sharing-demand/CVPreds.csv", delim=",")
+
+
+
+# Regression Tree (HW 9)
+install.packages("rpart")
+
+# new recipe
+bike_recipe_tree <- recipe(count~.,data=CleanTrainData) %>%
+  step_mutate(season=factor(season, levels=c(1,2,3,4),labels = c("spring","summer","fall","winter"))) %>%
+  step_mutate(weather=ifelse(weather==4,3,weather)) %>%
+  step_mutate(weather=factor(weather,levels=c(1,2,3),labels=c("cloudy","misty","rain"))) %>%
+  step_mutate(temp_windspeed = temp*windspeed) %>%
+  step_time(datetime, features=c("hour","minute")) %>%
+  step_date(datetime, features=c("dow")) %>%
+  step_mutate(datetime_hour=as.factor(datetime_hour)) %>%
+  step_rm(datetime) %>%
+  step_zv(all_predictors()) %>%
+  step_dummy(all_nominal_predictors())
+
+bike_tree <- decision_tree(tree_depth = tune(),
+                           cost_complexity = tune(),
+                           min_n=tune()) %>%
+  set_engine("rpart") %>%
+  set_mode("regression")
+
+# set workflow
+tree_wf <- workflow() %>%
+  add_recipe(bike_recipe_tree) %>%
+  add_model(bike_tree)
+
+# grid of values to tune over
+grid_of_tree_tuning_params <- grid_regular(tree_depth(),
+                                      cost_complexity(),
+                                      min_n(),
+                                      levels = 5)
+
+# split data for CV
+tree_folds <- vfold_cv(CleanTrainData, v = 10, repeats=1)
+
+# Run the CV
+tree_CV_results <- tree_wf %>%
+  tune_grid(resamples=folds,
+            grid=grid_of_tree_tuning_params,
+            metrics=metric_set(rmse,mae,rsq))
+
+# Find best tuning parameters
+best_treeTune <- tree_CV_results %>%
+  select_best(metric = "rmse")
+
+# Finalize the workflow and fit it
+final_tree_wf <- tree_wf %>%
+  finalize_workflow(best_treeTune) %>%
+  fit(data=CleanTrainData)
+
+tree_preds <- predict(final_tree_wf, new_data = testData)
+
+
+tree_kaggle_submission <- tree_preds %>%
+  bind_cols(., testData) %>%
+  select(datetime, .pred) %>%
+  rename(count=.pred) %>%
+  mutate(count=exp(count)) %>%
+  mutate(datetime=as.character(format(datetime)))
+
+# write out the file
+vroom_write(x=tree_kaggle_submission, file="C:/Users/Josh/BikeShare/bike-sharing-demand/TreePreds.csv", delim=",")
+
+
