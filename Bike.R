@@ -3,6 +3,7 @@ library(tidymodels)
 library(vroom)
 library(ggplot2)
 library(patchwork)
+install.packages("rpart")
 #install.packages("DataExplorer","skimr")
 #install.packages("GGally")
 install.packages("glmnet")
@@ -317,3 +318,50 @@ tree_kaggle_submission <- tree_preds %>%
 vroom_write(x=tree_kaggle_submission, file="C:/Users/Josh/BikeShare/bike-sharing-demand/TreePreds.csv", delim=",")
 
 
+## Random Forest (Homework 10)
+install.packages("ranger")
+my_randomforest_model <- rand_forest(mtry = tune(),
+                                     min_n=tune(),
+                                     trees=1000) %>%
+  set_engine("ranger") %>%
+  set_mode("regression")
+
+# set workflow
+randomforest_wf <- workflow() %>%
+  add_recipe(bike_recipe_tree) %>%
+  add_model(my_randomforest_model)
+
+# grid of values to tune over
+grid_of_randomforest_tuning_params <- grid_regular(mtry(range=c(1,10)),
+                                           min_n(),
+                                           levels = 5)
+
+# split data for CV
+randomforest_folds <- vfold_cv(CleanTrainData, v = 10, repeats=1)
+
+# Run the CV
+randomforest_CV_results <- randomforest_wf %>%
+  tune_grid(resamples=randomforest_folds,
+            grid=grid_of_randomforest_tuning_params,
+            metrics=metric_set(rmse,mae,rsq))
+
+# Find best tuning parameters
+best_randomforestTune <- randomforest_CV_results %>%
+  select_best(metric = "rmse")
+
+# Finalize the workflow and fit it
+final_randomforest_wf <- randomforest_wf %>%
+  finalize_workflow(best_randomforestTune) %>%
+  fit(data=CleanTrainData)
+
+randomforest_preds <- predict(final_randomforest_wf, new_data = testData)
+
+randomforest_kaggle_submission <- randomforest_preds %>%
+  bind_cols(., testData) %>%
+  select(datetime, .pred) %>%
+  rename(count=.pred) %>%
+  mutate(count=exp(count)) %>%
+  mutate(datetime=as.character(format(datetime)))
+
+# write out the file
+vroom_write(x=randomforest_kaggle_submission, file="C:/Users/Josh/BikeShare/bike-sharing-demand/RandomForestPreds.csv", delim=",")
