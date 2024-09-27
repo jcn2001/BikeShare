@@ -322,7 +322,7 @@ vroom_write(x=tree_kaggle_submission, file="C:/Users/Josh/BikeShare/bike-sharing
 install.packages("ranger")
 my_randomforest_model <- rand_forest(mtry = tune(),
                                      min_n=tune(),
-                                     trees=1000) %>%
+                                     trees=500) %>%
   set_engine("ranger") %>%
   set_mode("regression")
 
@@ -365,3 +365,87 @@ randomforest_kaggle_submission <- randomforest_preds %>%
 
 # write out the file
 vroom_write(x=randomforest_kaggle_submission, file="C:/Users/Josh/BikeShare/bike-sharing-demand/RandomForestPreds.csv", delim=",")
+
+
+
+# stacking (hw 11)
+library(stacks)
+
+# split the data for CV
+folds <- vfold_cv(CleanTrainData, v = 10, repeats = 1)
+
+# create a control grid
+untunedModel <- control_stack_grid() # if tuning over a grid
+tunedModel <- control_stack_resamples() # if not tuning a model
+
+# penalized regression model
+preg_stacking_model <- linear_reg(penalty=tune(),
+                                  mixture=tune()) %>%
+  set_engine("glmnet")
+
+# set workflow
+preg_stack_wf <- workflow() %>%
+  add_recipe(bike_recipe_pregression) %>%
+  add_model(preg_stacking_model)
+
+# grid of values to tune over
+preg_tuning_grid <- grid_regular(penalty(),
+                                 mixture(),
+                                 levels = 5)
+
+# run the cv
+preg_models <- preg_stack_wf %>%
+  tune_grid(resamples=folds,
+            grid=preg_tuning_grid,
+            metrics=metric_set(rmse,mae,rsq),
+            control = untunedModel)
+
+linreg_stack_model <-
+  linear_reg() %>%
+  set_engine("lm")
+
+lin_stack_reg_wf <- 
+  workflow() %>%
+  add_model(linreg_stack_model) %>%
+  add_recipe(bike_recipe)
+
+lin_reg_model <-
+  fit_resamples(
+    lin_stack_reg_wf,
+    resamples = folds,
+    metrics = metric_set(rmse,mae,rsq),
+    control = tunedModel
+  )
+
+
+random_forest_models <- randomforest_wf %>%
+  tune_grid(resamples = folds,
+            grid=grid_of_randomforest_tuning_params,
+            metrics=metric_set(rmse,mae,rsq),
+            control=untunedModel)
+
+
+
+# specify which models to include
+my_stack <- stacks() %>%
+  add_candidates(preg_models) %>%
+  add_candidates(lin_reg_model) %>%
+  add_candidates(random_forest_models) 
+
+# fit the stacked model
+stack_model <- my_stack %>%
+  blend_predictions() %>%
+  fit_members()
+
+# use the stacked data to get a prediction
+stack_preds <- stack_model %>% predict(new_data=testData)
+
+stack_kaggle_submission <- stack_preds %>%
+  bind_cols(., testData) %>%
+  select(datetime, .pred) %>%
+  rename(count=.pred) %>%
+  mutate(count=exp(count)) %>%
+  mutate(datetime=as.character(format(datetime)))
+
+# write out the file
+vroom_write(x=stack_kaggle_submission, file="C:/Users/Josh/BikeShare/bike-sharing-demand/StackPreds.csv", delim=",")
