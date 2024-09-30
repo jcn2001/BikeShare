@@ -175,10 +175,12 @@ bike_recipe_pregression <- recipe(count~.,data=CleanTrainData) %>%
 # penalized regression model
 preg_model <- linear_reg(penalty=1,mixture=0) %>%
   set_engine("glmnet")
+
 preg_wf <- workflow() %>%
   add_recipe(bike_recipe_pregression) %>%
   add_model(preg_model) %>%
   fit(data=CleanTrainData)
+
 predict(preg_wf, new_data=testData)
 
 # format the predictions for kaggle
@@ -449,3 +451,39 @@ stack_kaggle_submission <- stack_preds %>%
 
 # write out the file
 vroom_write(x=stack_kaggle_submission, file="C:/Users/Josh/BikeShare/bike-sharing-demand/StackPreds.csv", delim=",")
+
+
+
+## hw 12 (pick a model)
+## set up the bart model
+my_bart_model <- bart(
+  trees = 300,
+  prior_terminal_node_coef = NULL,
+  prior_terminal_node_expo = NULL,
+  prior_outcome_range = NULL
+) %>% 
+  set_engine("dbarts") %>% 
+  set_mode("regression") %>% 
+  translate()
+
+# set workflow
+bart_wf <- workflow() %>%
+  add_recipe(bike_recipe_tree) %>%
+  add_model(my_bart_model) %>%
+  fit(data=CleanTrainData)
+
+# make the predictions
+bart_preds <- predict(bart_wf, new_data=testData)
+
+# format for kaggle
+bart_kaggle_submission <- bart_preds %>%
+  bind_cols(., testData) %>%
+  select(datetime, .pred) %>%
+  rename(count=.pred) %>%
+  mutate(count=exp(count)) %>%
+  mutate(datetime=as.character(format(datetime)))
+
+# write out the file
+vroom_write(x=bart_kaggle_submission, file="C:/Users/Josh/BikeShare/bike-sharing-demand/BartPreds.csv", delim=",")
+
+
