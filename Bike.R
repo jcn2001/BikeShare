@@ -265,8 +265,10 @@ bike_recipe_tree <- recipe(count~.,data=CleanTrainData) %>%
   step_mutate(weather=factor(weather,levels=c(1,2,3),labels=c("cloudy","misty","rain"))) %>%
   step_mutate(temp_windspeed = temp*windspeed) %>%
   step_time(datetime, features=c("hour","minute")) %>%
-  step_date(datetime, features=c("dow")) %>%
+  step_date(datetime, features=c("year","dow")) %>%
   step_mutate(datetime_hour=as.factor(datetime_hour)) %>%
+  step_mutate(dow_hour = datetime_hour*datetime_dow) %>%
+  step_mutate(holiday_dow = holiday*datetime_dow) %>%
   step_rm(datetime) %>%
   step_zv(all_predictors()) %>%
   step_dummy(all_nominal_predictors())
@@ -485,5 +487,3 @@ bart_kaggle_submission <- bart_preds %>%
 
 # write out the file
 vroom_write(x=bart_kaggle_submission, file="C:/Users/Josh/BikeShare/bike-sharing-demand/BartPreds.csv", delim=",")
-
-
